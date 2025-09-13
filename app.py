@@ -231,6 +231,8 @@ def reindex_knowledgebase():
                     if text.strip():  # Only process non-empty files
                         # Split text into chunks using the text splitter
                         splits = text_splitter.create_documents([text])
+                        for doc in splits:
+                            doc.metadata['source'] = filename
                         docs.extend(splits)
                         processed_files.append(filename)
                     else:
@@ -539,8 +541,13 @@ Context:
 
                     # Display sources
                     st.markdown("### 📄 Retrieved Context")
+                    # for i, doc in enumerate(docs):
+                    #     print(f"doc.metadata: {doc.metadata}")
+                    #     st.markdown(f"**Source {i+1}:**")
+
                     for i, doc in enumerate(docs):
-                        st.markdown(f"**Source {i+1}:**")
+                        filename = doc.metadata.get('source', 'Unknown File')
+                        st.markdown(f"**Source {i+1}: {filename}**")
                         st.write(doc.page_content[:500] + "...")
         except Exception as e:
             st.error(f"Error during question answering: {e}")
