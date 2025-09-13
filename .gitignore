@@ -10,7 +10,7 @@ credentials.json
 
 # --- APP DATA ---
 # Uploaded documents
-data/
+#data/
 
 # Vector database (though we use temp dirs)
 chroma_db/
