@@ -231,6 +231,8 @@ def reindex_knowledgebase():
                     if text.strip():  # Only process non-empty files
                         # Split text into chunks using the text splitter
                         splits = text_splitter.create_documents([text])
+                        for doc in splits:
+                            doc.metadata['source'] = filename
                         docs.extend(splits)
                         processed_files.append(filename)
                     else:
@@ -292,7 +294,7 @@ def reindex_knowledgebase():
 # --- STREAMLIT APPLICATION SETUP ---
 # Configure the main page
 st.set_page_config(page_title="🧠 GenAI Bedrock Knowledgebase")
-st.title("🧠 GenAI Bedrock Knowledgebase")
+st.title("🧠 Flash.ai Knowledgebase")
 
 # --- NAVIGATION SIDEBAR ---
 # Initialize session state for page navigation (remembers which page user is on)
@@ -302,6 +304,9 @@ if 'current_page' not in st.session_state:
 # Initialize vectorstore loading state
 if 'vectorstore_loaded' not in st.session_state:
     st.session_state.vectorstore_loaded = False
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
 st.sidebar.title("🧭 Navigation")
 
@@ -490,59 +495,150 @@ elif page == "Ask Questions":
             st.info("📁 No files found. Go to 'Upload Files' to add documents first.")
 
     else:
-        try:
-            # Step 1: Set up retriever (top 3 chunks)
-            retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 3})
+        st.subheader("🃏 Generate Flashcards by Topic")
+        # try:
+        #     # Step 1: Set up retriever (top 3 chunks)
+        #     retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 3})
 
-            # Step 2: Initialize the Bedrock LLM (completion-style)
-            from langchain_community.llms import Bedrock
+        #     # Step 2: Initialize the Bedrock LLM (completion-style)
+        #     from langchain_community.llms import Bedrock
 
-            llm = ChatBedrockConverse(
-                region_name=AWS_REGION,
-                model_id=AWS_BEDROCK_LLM_MODEL_ID
-            )
+        #     llm = ChatBedrockConverse(
+        #         region_name=AWS_REGION,
+        #         model_id=AWS_BEDROCK_LLM_MODEL_ID
+        #     )
 
-            # Step 3: Text input for question
-            question = st.text_input("Enter your question:")
+        #     # Step 3: Text input for question
+        #     question = st.text_input("Enter your question:")
 
-            if st.button("Generate Answer") and question:
-                with st.spinner("Retrieving and generating answer..."):
-                    # Retrieve relevant documents
-                    docs = retriever.get_relevant_documents(question)
+        #     if st.button("Generate Answer") and question:
+        #         with st.spinner("Retrieving and generating answer..."):
+        #             # Retrieve relevant documents
+        #             docs = retriever.get_relevant_documents(question)
+        #             context = "\n\n".join([doc.page_content for doc in docs])
+
+        # Flashcard topics and prompts
+        flashcard_topics = {
+            "Python": "List 25 important Python programming terms and their definitions as flashcards.",
+            "AWS Bedrock": "List 25 key AWS Bedrock concepts and their definitions as flashcards.",
+            "LLM": "List 25 important Large Language Model (LLM) terms and their definitions as flashcards.",
+            "Bash": "List 25 essential Bash commands or terms and their definitions as flashcards."
+        }
+
+        col1, col2, col3, col4 = st.columns(4)
+        topic_clicked = None
+        if col1.button("🐍 Python", use_container_width=True):
+            topic_clicked = "Python"
+        if col2.button("☁️ AWS Bedrock", use_container_width=True):
+            topic_clicked = "AWS Bedrock"
+        if col3.button("🤖 LLM", use_container_width=True):
+            topic_clicked = "LLM"
+        if col4.button("💻 Bash", use_container_width=True):
+            topic_clicked = "Bash"
+
+        # Process if a topic button was clicked
+        if topic_clicked:
+            with st.spinner(f"Generating {topic_clicked} flashcards..."):
+                try:
+                    # Retrieve related context from vectorstore
+                    retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 5})
+                    docs = retriever.get_relevant_documents(topic_clicked)
                     context = "\n\n".join([doc.page_content for doc in docs])
 
-                    # Build prompt
+                    # Build structured prompt
                     prompt = f"""
-You are an AI assistant helping answer questions based on the provided context.
+                    You are an AI assistant. Based on the following context, generate a CSV with 25 flashcards 
+                    for the topic "{topic_clicked}". Each flashcard should have a 'Term' and 'Definition'. 
+                    Only output the CSV, no explanations.
 
-Context:
-{context}
-"""
+                    Context:
+                    {context}
 
+                    CSV format:
+                    Term,Definition
+                    """
+
+                    # Invoke Bedrock
+                    llm = ChatBedrockConverse(
+                        region_name=AWS_REGION,
+                        model_id=AWS_BEDROCK_LLM_MODEL_ID
+                    )
                     messages = [
-                        (
-                            "system",
-                            prompt,
-                        ),
-                        (
-                            "human", 
-                            question,
-                        ),
+                        ("system", prompt),
+                        ("human", flashcard_topics[topic_clicked]),
                     ]
-
-                    # Generate completion
                     answer = llm.invoke(messages)
+                    csv_content = answer.content.strip()
 
-                    # Display answer
-                    st.markdown("### 💬 Answer")
-                    st.write(answer.content)
+                    # Show response
+                    st.markdown(f"### 🃏 {topic_clicked} Flashcards CSV")
+                    st.code(csv_content, language="csv")
 
-                    # Display sources
-                    st.markdown("### 📄 Retrieved Context")
-                    for i, doc in enumerate(docs):
-                        st.markdown(f"**Source {i+1}:**")
-                        st.write(doc.page_content[:500] + "...")
-        except Exception as e:
-            st.error(f"Error during question answering: {e}")
-            st.info("Please re-index your knowledgebase.")
-            st.session_state.vectorstore_loaded = False
+                    # Download option
+                    csv_bytes = csv_content.encode("utf-8")
+                    st.download_button(
+                        label="📥 Download Flashcards CSV",
+                        data=csv_bytes,
+                        file_name=f"{topic_clicked}_flashcards.csv",
+                        mime="text/csv"
+                    )
+
+                except Exception as e:
+                    st.error(f"❌ Error generating flashcards: {e}")
+
+        st.markdown("---")
+        st.subheader("💬 Chat with Knowledgebase")
+
+        # Initialize chat history if not already
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+
+        # Chat input from the user
+        user_input = st.text_input("Enter your question:", key="user_input")
+
+        if st.button("Send"):
+            if user_input:
+                with st.spinner("Generating answer..."):
+                    try:
+                        # Use retriever to get relevant docs
+                        retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 3})
+                        docs = retriever.get_relevant_documents(user_input)
+                        context = "\n\n".join([doc.page_content for doc in docs])
+
+                        prompt = f"""
+                        You are an AI assistant helping answer questions based on the provided context.
+
+                        Context:
+                        {context}
+
+                        Question:
+                        {user_input}
+                        """
+
+                        llm = ChatBedrockConverse(
+                            region_name=AWS_REGION,
+                            model_id=AWS_BEDROCK_LLM_MODEL_ID
+                        )
+                        messages = [
+                            ("system", prompt),
+                            ("human", user_input),
+                        ]
+
+                        answer = llm.invoke(messages)
+                        response_text = answer.content.strip()
+
+                        # Save to chat history
+                        st.session_state.chat_history.append({"role": "user", "text": user_input})
+                        st.session_state.chat_history.append({"role": "assistant", "text": response_text})
+
+                    except Exception as e:
+                        st.error(f"❌ Error generating answer: {e}")
+
+        # Display chat history in chat bubbles
+        for chat in st.session_state.chat_history:
+            if chat["role"] == "user":
+                with st.chat_message("user"):
+                    st.markdown(chat["text"])
+            else:
+                with st.chat_message("assistant"):
+                    st.markdown(chat["text"])
